@@ -40,7 +40,7 @@ function ageMinutes(value) {
   return Number.isFinite(stamp) ? (Date.now() - stamp)/60000 : Infinity;
 }
 function snapshotState() {
-  if (!state.live?.generatedAt) return 'error';
+  if (!state.live?.generatedAt || state.live.status === 'error') return 'error';
   return ageMinutes(state.live.generatedAt) > 40 ? 'stale' : 'fresh';
 }
 function stationById(id) { return state.stations.find(s => s.id === id); }
@@ -103,7 +103,7 @@ function updateHeader() {
   const freshness = snapshotState();
   const node = $('#header-status');
   if (!node) return;
-  const text = freshness === 'fresh' ? 'Dati recenti' :
+  const text = freshness === 'fresh' ? (state.live.status === 'partial' ? 'Dati parziali' : 'Dati recenti') :
     freshness === 'stale' ? 'Dati non recenti' : 'Dati non disponibili';
   node.innerHTML = '<span class="status-dot '+freshness+'"></span> '+text;
 }
@@ -148,7 +148,7 @@ function renderHome() {
   const stations = monitoredStations();
   const tiles = stations.map(s => {
     const snap = stationData(s.id);
-    const valid = snap && snap.status === 'ok';
+    const valid = snap && (snap.status === 'ok' || snap.status === 'partial') && Array.isArray(snap.departures);
     const count = valid ? (snap.departures?.length || 0) : null;
     const text = count === null ? 'Dati in attesa' : count + ' partenze disponibili';
     return '<button type="button" class="station-tile" data-station="'+escapeHtml(s.id)+'">'+
@@ -171,7 +171,7 @@ function delayInfo(train) {
   if (delay === null || delay === undefined || !Number.isFinite(Number(delay)))
     return {css:'unknown',label:'Non indicato'};
   const n = Number(delay);
-  if (n === 0) return {css:'ok',label:'In orario'};
+  if (n === 0) return {css:'ok',label:train.notDeparted ? '0 min segnalati' : 'In orario'};
   if (n < 0) return {css:'early',label:Math.abs(n)+' min anticipo'};
   return {css:n>=15?'very-late':'late',label:'+'+n+' min'};
 }
@@ -209,14 +209,19 @@ function renderStation() {
       'config/monitor.json. Puoi aggiungerla al repository e attendere il prossimo aggiornamento automatico.</p></div>'+
       '<button class="outline-button" type="button" data-home>Vedi stazioni monitorate</button>';
   }
-  if (!snap || snap.status !== 'ok') {
+  if (!snap || snap.status === 'error') {
     return base + '<div class="panel">'+emptyState('Tabellone temporaneamente indisponibile',
       'Non abbiamo ricevuto dati validi per questa stazione. Non significa che non circolino treni. Riprova più tardi.', '◷')+'</div>';
   }
   const label = state.board === 'departures' ? 'Partenze' : 'Arrivi';
   const data = state.board === 'departures' ? snap.departures : snap.arrivals;
+  if (!Array.isArray(data)) {
+    return base + '<div class="panel">'+emptyState('Questa sezione non è disponibile',
+      'Non sono arrivati dati validi per '+label.toLowerCase()+'. Riprova al prossimo aggiornamento.', '◷')+'</div>'+
+      '<button class="outline-button" type="button" data-board="'+(state.board === 'arrivals' ? 'departures' : 'arrivals')+'">Prova l’altro tabellone</button>';
+  }
   const filter = normalize(state.filter);
-  const filtered = (Array.isArray(data)?data:[]).filter(t =>
+  const filtered = data.filter(t =>
     !filter || normalize([t.number,t.other,t.destination,t.origin,t.category].join(' ')).includes(filter));
   const timeText = dateTime(snap.updatedAt || state.live.generatedAt);
   const old = ageMinutes(snap.updatedAt || state.live.generatedAt) > 40;
@@ -299,7 +304,7 @@ function allTrainMatches(number) {
   const found = [];
   const num = String(number).replace(/\D/g,'');
   for (const [stationId,snap] of Object.entries(state.live.stations || {})) {
-    if (!snap || snap.status !== 'ok') continue;
+    if (!snap || snap.status === 'error') continue;
     for (const direction of ['departures','arrivals']) {
       for (const t of snap[direction] || []) {
         if (String(t.number)===num) found.push({...t,stationId,direction});
