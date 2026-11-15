@@ -1,6 +1,6 @@
 # 🚆 Treni — Arrivi, partenze e stato dei treni
 
-Web app italiana, progettata per iPhone e desktop, pubblicata **esclusivamente con GitHub Pages e GitHub Actions**, senza server, database o servizi aggiuntivi.
+Web app italiana, progettata per iPhone e desktop, pubblicata **esclusivamente con GitHub Pages e GitHub Actions**, senza server, database o servizi aggiuntivi. La schermata iniziale privilegia le tre ricerche: **Stazione · Città · Numero treno**.
 
 > **Attenzione:** questa applicazione visualizza **fotografie periodiche**, non dati live interrogati su richiesta. Solo le stazioni configurate vengono monitorate. Fonte: API non ufficiali ViaggiaTreno, soggette a modifiche/interruzioni. Progetto indipendente, non affiliato a Trenitalia.
 
@@ -17,6 +17,7 @@ Se la prima esecuzione fallisce, controlla i log del job *Raccogli dati e prepar
 
 - Ricerca per **città e nome stazione**; scegliere tra più stazioni che contengono il nome.
 - **Partenze e arrivi** delle stazioni monitorate, con orario, categoria e numero treno, destinazione/provenienza, binario, ritardo o soppressione dove comunicati.
+- **Tentativo di aggiornamento diretto** quando si apre una stazione, si cambia tra arrivi/partenze o si preme Aggiorna. Se CORS o HTTPS bloccano ViaggiaTreno, l'app utilizza il tabellone già acquisito da GitHub Actions, segnalando chiaramente *Snapshot GitHub* invece di *Diretto*.
 - Ricerca per **numero del treno** negli snapshot disponibili e scheda con le presenze nei tabelloni monitorati; collegamento alla **scheda ufficiale**.
 - **Preferiti** salvati sul dispositivo, ricerca e filtro rapido, indicatore di aggiornamento e avviso di dati vecchi.
 - Grafica responsive e **PWA** installabile tramite browser.
@@ -37,7 +38,7 @@ artifact GitHub Pages -> https://bolkan.github.io/Treni/
 Browser: HTML/CSS/JavaScript + preferiti locali
 ```
 
-Il browser **non interroga direttamente** ViaggiaTreno (problemi CORS e possibili blocchi). Nessun commit di dati ripetuto ogni 15 minuti: il workflow distribuisce un nuovo artifact Pages. Il catalogo nazionale delle stazioni viene memorizzato in una **cache giornaliera GitHub Actions** quando la fonte è raggiungibile.
+Il browser **prova** a interrogare direttamente ViaggiaTreno, ma **non è garantito che possa leggere la risposta** (problemi CORS, supporto HTTPS e possibili blocchi): per questo il workflow GitHub Actions rimane necessario come fallback. Nessun commit di dati ripetuto ogni 15 minuti: il workflow distribuisce un nuovo artifact Pages. Il catalogo nazionale delle stazioni viene memorizzato in una **cache giornaliera GitHub Actions** quando la fonte è raggiungibile.
 
 ### Aggiungere/rimuovere stazioni monitorate
 
@@ -59,7 +60,8 @@ In **[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)** cambia la 
 
 ## Limiti da conoscere
 
-- Nessuna interrogazione **live** di un numero/stazione arbitraria: serve in futuro un servizio dati accessibile su richiesta.
+- Il tentativo diretto è *best effort* e normalmente può fallire per restrizioni CORS: non garantisce informazioni live. Per una vera interrogazione a richiesta di ogni stazione e treno servirà in futuro una fonte compatibile con browser o un intermediario.
+- Non vengono usati **proxy CORS pubblici di terzi**, né il VPS, né Cloudflare.
 - In caso di mancata risposta dell'API i dati **non sono inventati**: il sito mostra una condizione di errore.
 - La ricerca per città è un confronto sul **nome della stazione**, non sull'anagrafe dei comuni.
 - La scheda treno mostra solo le **presenze nei tabelloni acquisiti**, non l'intero percorso.
