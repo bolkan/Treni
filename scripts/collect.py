@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 import shutil
 import sys
@@ -27,13 +26,22 @@ OUT = ROOT / "_site"
 CACHE = ROOT / "_cache" / "stations.json"
 CONFIG = ROOT / "config" / "monitor.json"
 SOURCE_URLS = (
-    "https://www.viaggiatreno.it/infomobilita/resteasy/viaggiatreno",
     "http://www.viaggiatreno.it/infomobilita/resteasy/viaggiatreno",
+    "https://www.viaggiatreno.it/infomobilita/resteasy/viaggiatreno",
+    "http://www.viaggiatreno.it/viaggiatrenonew/resteasy/viaggiatreno",
+    "https://www.viaggiatreno.it/viaggiatrenonew/resteasy/viaggiatreno",
 )
 ITALY = ZoneInfo("Europe/Rome")
 REGIONS = range(1, 23)
 STATION_CODE = re.compile(r"^S\d{5}$")
 LOG = logging.getLogger("treni")
+DIAGNOSTICS: list[str] = []
+
+
+def record_diagnostic(message: str) -> None:
+    """Conserva poche informazioni non sensibili sul motivo del guasto."""
+    if len(DIAGNOSTICS) < 15:
+        DIAGNOSTICS.append(message[:240])
 
 
 def now_utc() -> str:
@@ -48,15 +56,16 @@ def normalize(value: object) -> str:
 
 def fetch(endpoint: str, *, expect_json: bool = True):
     """Fetch con limite dimensione/tempo e fallback di protocollo."""
-    last_error: Exception | None = None
+    attempts: list[str] = []
     for base in SOURCE_URLS:
         url = base + "/" + endpoint.lstrip("/")
         req = Request(url, headers={
-            "User-Agent": "TreniGitHubPages/1.0 (unofficial, periodic station snapshots)",
+            "User-Agent": "Mozilla/5.0 (compatible; TreniPages/1.0)",
             "Accept": "application/json,text/plain,*/*",
+            "Referer": "http://www.viaggiatreno.it/infomobilita/index.jsp",
         })
         try:
-            with urlopen(req, timeout=8) as response:
+            with urlopen(req, timeout=6) as response:
                 raw = response.read(5_000_001)
                 if len(raw) > 5_000_000:
                     raise ValueError("risposta troppo grande")
@@ -65,8 +74,8 @@ def fetch(endpoint: str, *, expect_json: bool = True):
                     return json.loads(content)
                 return content
         except (HTTPError, URLError, TimeoutError, ValueError, OSError, json.JSONDecodeError) as exc:
-            last_error = exc
-    raise RuntimeError(f"Endpoint non disponibile: {endpoint} ({last_error})")
+            attempts.append(f"{base.split(':')[0]}:{type(exc).__name__} {str(exc)[:80]}")
+    raise RuntimeError(f"{endpoint}: {'; '.join(attempts)}")
 
 
 def parse_stations(values: object) -> list[dict]:
@@ -111,6 +120,7 @@ def seed_catalog(names: list[str]) -> list[dict]:
                 found[station["id"]] = station
         except Exception as exc:
             LOG.warning("Risoluzione stazione %s fallita: %s", name, exc)
+            record_diagnostic(f"Stazione {name}: {exc}")
     return list(found.values())
 
 
@@ -143,6 +153,7 @@ def load_catalog(names: list[str]) -> list[dict]:
         except Exception as exc:
             consecutive_failures += 1
             LOG.warning("Regione %s: %s", region, exc)
+            record_diagnostic(f"Elenco regione {region}: {exc}")
         if consecutive_failures >= 4 and not successes:
             LOG.error("Catalogo non raggiungibile: interrompo i tentativi regionali")
             break
@@ -320,6 +331,7 @@ def collect() -> int:
                 boards[direction] = None
                 errors += 1
                 LOG.warning("%s %s: %s", station["name"], direction, exc)
+                record_diagnostic(f"{station['name']} {direction}: {exc}")
             time.sleep(0.12)
         snapshots[station["id"]] = {
             "id": station["id"], "name": station["name"],
@@ -338,6 +350,10 @@ def collect() -> int:
                   else "partial" if ok_boards else "error",
         "monitored": len(selected),
         "unresolved": unresolved,
+        "catalogCount": len(catalog),
+        "successfulBoards": ok_boards,
+        "failedBoards": errors,
+        "diagnostics": DIAGNOSTICS[:8],
         "stations": snapshots,
     })
     LOG.info("Terminato: %s tabelloni validi, %s errori, %s stazioni", ok_boards, errors, len(selected))
