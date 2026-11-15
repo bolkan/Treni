@@ -1,0 +1,17 @@
+{
+  "notes": "Solo i tabelloni di queste stazioni vengono aggiornati automaticamente. I nomi sono risolti dal catalogo ViaggiaTreno. Mantieni un numero moderato di stazioni.",
+  "stations": [
+    "CATANIA CENTRALE",
+    "CATANIA AEROPORTO FONTANAROSSA",
+    "CATANIA OGNINA",
+    "CATANIA EUROPA",
+    "ACIREALE",
+    "GIARRE-RIPOSTO",
+    "MESSINA CENTRALE",
+    "PALERMO CENTRALE",
+    "SIRACUSA",
+    "ROMA TERMINI",
+    "MILANO CENTRALE",
+    "NAPOLI CENTRALE"
+  ]
+}
