@@ -56,7 +56,7 @@ def fetch(endpoint: str, *, expect_json: bool = True):
             "Accept": "application/json,text/plain,*/*",
         })
         try:
-            with urlopen(req, timeout=13) as response:
+            with urlopen(req, timeout=8) as response:
                 raw = response.read(5_000_001)
                 if len(raw) > 5_000_000:
                     raise ValueError("risposta troppo grande")
@@ -81,7 +81,7 @@ def parse_stations(values: object) -> list[dict]:
         if not isinstance(place, dict):
             place = item
         station_id = item.get("codiceStazione") or item.get("id") or place.get("id")
-        name = place.get("nomeLungo") or item.get("nomeLungo")
+        name = place.get("nomeLungo") or item.get("nomeLungo") or item.get("name")
         if isinstance(station_id, str) and STATION_CODE.fullmatch(station_id) and isinstance(name, str) and name.strip():
             stations.append({"id": station_id, "name": name.strip().upper()})
     return stations
@@ -286,6 +286,8 @@ def collect() -> int:
     for item in catalog:
         item["monitored"] = item["id"] in selected_ids
 
+    if not catalog:
+        LOG.error("Catalogo completamente indisponibile: il sito mostrerà lo stato di errore.")
     if OUT.exists():
         shutil.rmtree(OUT)
     shutil.copytree(PUBLIC, OUT)
@@ -314,8 +316,8 @@ def collect() -> int:
             time.sleep(0.12)
         snapshots[station["id"]] = {
             "id": station["id"], "name": station["name"],
-            "status": "ok" if not failed else "error",
-            "updatedAt": now_utc() if not failed else None,
+            "status": "ok" if not failed else ("partial" if len(failed) == 1 else "error"),
+            "updatedAt": now_utc() if len(failed) < 2 else None,
             "departures": boards["departures"],
             "arrivals": boards["arrivals"],
             "errors": failed,
