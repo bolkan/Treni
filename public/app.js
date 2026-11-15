@@ -335,8 +335,12 @@ function renderStation() {
   const label = state.board === 'departures' ? 'Partenze' : 'Arrivi';
   const data = state.board === 'departures' ? snap.departures : snap.arrivals;
   if (!Array.isArray(data)) {
-    return base + '<div class="panel">'+emptyState('Questa sezione non è disponibile',
-      'Non sono arrivati dati validi per '+label.toLowerCase()+'. Riprova al prossimo aggiornamento.', '◷')+'</div>'+
+    const pending = Boolean(state.directFetching[station.id+':'+state.board]);
+    return base + '<div class="panel">'+emptyState(
+      pending?'Sto verificando il tabellone…':'Questa sezione non è disponibile',
+      pending?'Tentativo di collegamento diretto in corso.':
+        'Il browser non ha potuto interrogare ViaggiaTreno e non sono disponibili dati salvati per '+label.toLowerCase()+'.', '◷')+'</div>'+
+      '<button class="outline-button" type="button" data-retry-board>↻ Riprova</button>'+
       '<button class="outline-button" type="button" data-board="'+(state.board === 'arrivals' ? 'departures' : 'arrivals')+'">Prova l’altro tabellone</button>';
   }
   const filter = normalize(state.filter);
@@ -345,6 +349,7 @@ function renderStation() {
   const direct = currentBoardIsDirect(station.id,state.board);
   const timeText = dateTime(boardUpdateTime(station.id,state.board));
   const old = !direct && ageMinutes(boardUpdateTime(station.id,state.board)) > 40;
+  const loading = Boolean(state.directFetching[station.id+':'+state.board]);
   const warning = old ? '<div class="alert-panel"><h3>Dati non recenti</h3><p>Questo tabellone non è stato aggiornato recentemente. Non usarlo come informazione live.</p></div>' : '';
   return base + warning + '<div class="panel"><div class="board-toolbar">'+
     '<div class="board-tabs" role="tablist" aria-label="Tipo di tabellone">'+
@@ -354,7 +359,8 @@ function renderStation() {
     '" aria-selected="'+(state.board==='arrivals')+'" data-board="arrivals">↙ Arrivi</button></div>'+
     '<span class="board-updated"><span class="status-dot '+(old?'stale':'fresh')+'"></span> '+
     (direct?'Diretto':'Snapshot GitHub')+' · '+escapeHtml(timeText)+'</span>'+
-    '<button class="outline-button" type="button" data-retry-board aria-label="Aggiorna tabellone">↻ Aggiorna</button></div>'+
+    '<button class="outline-button" type="button" data-retry-board aria-label="Aggiorna tabellone">'+
+    (loading?'Aggiornamento…':'↻ Aggiorna')+'</button></div>'+
     '<div class="board-summary"><div><h3>'+label+' in stazione</h3>'+
     '<span class="board-count">'+filtered.length+' treni nel tabellone acquisito</span></div>'+
     '<input type="search" class="filter-input" id="board-filter" placeholder="Filtra treno o destinazione…" aria-label="Filtra il tabellone" value="'+escapeHtml(state.filter)+'"></div>'+
@@ -364,7 +370,9 @@ function renderStation() {
        emptyState(filter ? 'Nessun treno corrispondente' : 'Nessun treno nel tabellone',
        filter?'Prova un altro numero o rimuovi il filtro.':
        'La fonte ha restituito una lista vuota per questa stazione e fascia oraria.','⌕'))+
-    '</div></div><p class="disclaimer">Gli orari, i ritardi e i binari possono cambiare. Questo è uno snapshot, non una connessione live. Verifica sempre gli annunci ufficiali.</p>';
+    '</div></div><p class="disclaimer">Gli orari, i ritardi e i binari possono cambiare. '+
+    (direct?'Dati ottenuti direttamente dal servizio, ma non aggiornati in modo continuo.':'Dati dello snapshot periodico di GitHub, non in tempo reale.')+
+    ' Verifica sempre gli annunci ufficiali.</p>';
 }
 function render() {
   renderNotice();
@@ -499,7 +507,7 @@ function installEvents() {
   $('#search-input').addEventListener('focus',event=>showSuggestions(event.target.value));
   $('#refresh-button').addEventListener('click',()=>refreshData(true));
   $('#favorites-link').addEventListener('click',()=>{
-    if (state.stationId) {state.stationId=null;updateHash();render();}
+    if (state.stationId) {state.stationId=null;updateHash();render();updateHeader();}
     const section = $('#favorites-area');
     if (section) section.scrollIntoView({behavior:'smooth',block:'center'});
     else toast('Non hai ancora salvato stazioni preferite.');
@@ -516,7 +524,7 @@ function installEvents() {
     if (target.hasAttribute('data-close')) {closeModal();return;}
     if (target.dataset.searchMode) {setMode(target.dataset.searchMode);return;}
     if (target.hasAttribute('data-home')) {
-      state.stationId=null;state.filter='';updateHash();render();
+      state.stationId=null;state.filter='';updateHash();render();updateHeader();
       $('#main-content').scrollIntoView({behavior:'smooth'});return;
     }
     if (target.dataset.station) {openStation(target.dataset.station);return;}
