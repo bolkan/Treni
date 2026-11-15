@@ -6,8 +6,79 @@ const state = {
   stations: [], live: { generatedAt: null, stations: {} },
   stationId: null, board: 'departures', searchMode: 'station',
   filter: '', favorites: readFavorites(), loaded: false,
-  selectedTrain: null, toastTimer: null, requestId: 0
+  selectedTrain: null, toastTimer: null, requestId: 0,
+  directBoards: {}, directFetching: {}, directErrors: {}, directAttempts: {}
 };
+
+
+/* GitHub Pages è statico. Questo è un tentativo best-effort diretto:
+ * le API possono non abilitare CORS e in tal caso lo snapshot GitHub rimane il fallback.
+ * Non vengono usati proxy esterni né dati simulati. */
+function italianClock(ms) {
+  if (!Number.isFinite(Number(ms)) || Number(ms) < 100000000000) return null;
+  return new Intl.DateTimeFormat('it-IT',{
+    timeZone:'Europe/Rome',hour:'2-digit',minute:'2-digit',hourCycle:'h23'
+  }).format(new Date(Number(ms)));
+}
+function mapDirectTrain(raw,direction) {
+  if (!raw || typeof raw !== 'object' || !Number.isFinite(Number(raw.numeroTreno))) return null;
+  const dep=direction==='departures';
+  const hour=dep?'compOrarioPartenza':'compOrarioArrivo';
+  const ms=dep?'orarioPartenza':'orarioArrivo';
+  const timeMatch=String(raw[hour]||'').match(/(?:^|\D)([01]?\d|2[0-3]):([0-5]\d)(?:\D|$)/);
+  const scheduled=timeMatch?String(timeMatch[1]).padStart(2,'0')+':'+timeMatch[2]:italianClock(raw[ms]);
+  const origin=typeof raw.origine==='string'?raw.origine:null;
+  const destination=typeof raw.destinazione==='string'?raw.destinazione:null;
+  const prefix=dep?'Partenza':'Arrivo';
+  return {
+    number:String(Number(raw.numeroTreno)),
+    category:String(raw.categoriaDescrizione||raw.categoria||'Treno').trim().slice(0,40),
+    scheduled,
+    delay:typeof raw.ritardo==='number'?Math.round(raw.ritardo):null,
+    cancelled:raw.provvedimento===1,
+    notDeparted:Boolean(raw.nonPartito),
+    platform:raw['binarioEffettivo'+prefix+'Descrizione']||raw['binarioEffettivo'+prefix+'Codice']||null,
+    platformPlanned:raw['binarioProgrammato'+prefix+'Descrizione']||raw['binarioProgrammato'+prefix+'Codice']||null,
+    origin,destination,other:dep?destination:origin
+  };
+}
+async function refreshBoardDirect(stationId,direction) {
+  const key=stationId+':'+direction;
+  const attempt=(state.directAttempts[key]||0)+1;
+  state.directAttempts[key]=attempt;
+  state.directFetching[key]=true;
+  if (state.stationId===stationId && state.board===direction) render();
+  const controller=new AbortController();
+  const timeout=setTimeout(()=>controller.abort(),4500);
+  try {
+    const action=direction==='departures'?'partenze':'arrivi';
+    const endpoint='https://www.viaggiatreno.it/infomobilita/resteasy/viaggiatreno/';
+    const url=endpoint+action+'/'+encodeURIComponent(stationId)+'/'+encodeURIComponent(new Date().toString());
+    const response=await fetch(url,{mode:'cors',credentials:'omit',cache:'no-store',signal:controller.signal});
+    if (!response.ok) throw new Error('HTTP '+response.status);
+    const raw=await response.json();
+    if (!Array.isArray(raw)) throw new Error('Formato dati non valido');
+    if (state.directAttempts[key]!==attempt) return;
+    const items=raw.slice(0,150).map(item=>mapDirectTrain(item,direction)).filter(Boolean);
+    const direct=state.directBoards[stationId]||{times:{}};
+    direct[direction]=items;
+    direct.times[direction]=new Date().toISOString();
+    direct.updatedAt=direct.times[direction];
+    state.directBoards[stationId]=direct;
+    delete state.directErrors[key];
+    if (state.stationId===stationId && state.board===direction) toast('Tabellone aggiornato direttamente da ViaggiaTreno.');
+  } catch(error) {
+    if (state.directAttempts[key]!==attempt) return;
+    state.directErrors[key]=String(error?.name==='AbortError'?'Tempo scaduto':error?.message||'Connessione negata');
+    console.info('Accesso diretto a ViaggiaTreno non disponibile, uso i dati GitHub:',state.directErrors[key]);
+  } finally {
+    clearTimeout(timeout);
+    if (state.directAttempts[key]===attempt) {
+      delete state.directFetching[key];
+      if (state.stationId===stationId && state.board===direction) {updateHeader();render();}
+    }
+  }
+}
 
 function readFavorites() {
   try {
@@ -40,11 +111,32 @@ function ageMinutes(value) {
   return Number.isFinite(stamp) ? (Date.now() - stamp)/60000 : Infinity;
 }
 function snapshotState() {
+  if (state.stationId && currentBoardIsDirect(state.stationId,state.board)) return 'fresh';
   if (!state.live?.generatedAt || state.live.status === 'error') return 'error';
   return ageMinutes(state.live.generatedAt) > 40 ? 'stale' : 'fresh';
 }
 function stationById(id) { return state.stations.find(s => s.id === id); }
-function stationData(id) { return state.live?.stations?.[id] || null; }
+function stationData(id) {
+  const published = state.live?.stations?.[id] || null;
+  const direct = state.directBoards[id];
+  if (!direct) return published;
+  const departures = Array.isArray(direct.departures) ? direct.departures : published?.departures;
+  const arrivals = Array.isArray(direct.arrivals) ? direct.arrivals : published?.arrivals;
+  return {
+    ...(published || {}), id,
+    departures, arrivals,
+    status: Array.isArray(departures) && Array.isArray(arrivals) ? 'ok' : 'partial',
+    updatedAt: direct.updatedAt || published?.updatedAt || null
+  };
+}
+function currentBoardIsDirect(id, direction) {
+  return Array.isArray(state.directBoards[id]?.[direction]);
+}
+function boardUpdateTime(id, direction) {
+  return state.directBoards[id]?.times?.[direction]
+    || state.live?.stations?.[id]?.updatedAt
+    || state.live?.generatedAt;
+}
 function isMonitored(id) { return Boolean(stationById(id)?.monitored || stationData(id)); }
 function friendly(value) {
   return String(value || '').trim().toLowerCase().replace(/\b\p{L}/gu, c => c.toUpperCase())
@@ -90,9 +182,12 @@ async function refreshData(manual = false) {
     state.loaded = true;
     updateHeader();
     render();
-    if (manual && results.every(r => r.status === 'fulfilled')) {
-      toast('Hai caricato gli ultimi dati pubblicati su GitHub Pages.');
+    if (manual && state.stationId) {
+      refreshBoardDirect(state.stationId, state.board);
+    } else if (manual && results.every(r => r.status === 'fulfilled')) {
+      toast('Ultimi dati pubblicati su GitHub Pages caricati.');
     }
+    if (!manual && state.stationId) refreshBoardDirect(state.stationId, state.board);
   } catch(error) {
     console.error('Errore nel caricamento dei dati:', error);
     state.loaded = true;
@@ -104,7 +199,8 @@ function updateHeader() {
   const freshness = snapshotState();
   const node = $('#header-status');
   if (!node) return;
-  const text = freshness === 'fresh' ? (state.live.status === 'partial' ? 'Dati parziali' : 'Dati recenti') :
+  const text = state.stationId && currentBoardIsDirect(state.stationId,state.board) ? 'Richiesta diretta' :
+    freshness === 'fresh' ? (state.live.status === 'partial' ? 'Dati parziali' : 'Dati recenti') :
     freshness === 'stale' ? 'Dati non recenti' : 'Dati non disponibili';
   node.innerHTML = '<span class="status-dot '+freshness+'"></span> '+text;
 }
@@ -112,6 +208,10 @@ function renderNotice() {
   const notice = $('#notice-bar');
   const freshness = snapshotState();
   const partial = state.live?.status === 'partial';
+  if (state.stationId && currentBoardIsDirect(state.stationId,state.board)) {
+    notice.hidden = true;
+    return;
+  }
   if (freshness === 'fresh' && !partial) {
     notice.hidden = true;
     return;
@@ -218,14 +318,19 @@ function renderStation() {
     '" data-fav="'+escapeHtml(station.id)+'" aria-label="'+(favorite?'Rimuovi dai':'Aggiungi ai')+' preferiti">'+
     (favorite?'★ Nei preferiti':'☆ Salva stazione')+'</button></div>';
   if (!isMonitored(station.id)) {
-    return base + '<div class="alert-panel"><h3>Questa stazione è nel catalogo, ma non è monitorata.</h3>'+
-      '<p>Su GitHub Pages possiamo mostrare aggiornamenti solo per le stazioni configurate in '+
-      'config/monitor.json. Puoi aggiungerla al repository e attendere il prossimo aggiornamento automatico.</p></div>'+
-      '<button class="outline-button" type="button" data-home>Vedi stazioni monitorate</button>';
+    const loading = Boolean(state.directFetching[station.id+':'+state.board]);
+    return base + '<div class="alert-panel"><h3>'+
+      (loading ? 'Provo a collegarmi a ViaggiaTreno…' : 'Nessun tabellone disponibile per questa stazione')+
+      '</h3><p>'+(loading
+        ? 'Richiesta diretta in corso. Se il browser la blocca, mostreremo il risultato.'
+        : 'Questa stazione non è nello snapshot di GitHub. Il collegamento diretto non è riuscito: i browser HTTPS possono bloccare le API ViaggiaTreno per CORS. Per avere dati anche qui, aggiungila a config/monitor.json.')+
+      '</p></div><button class="outline-button" type="button" data-retry-board>Riprova aggiornamento</button>';
   }
   if (!snap || snap.status === 'error') {
-    return base + '<div class="panel">'+emptyState('Tabellone temporaneamente indisponibile',
-      'Non abbiamo ricevuto dati validi per questa stazione. Non significa che non circolino treni. Riprova più tardi.', '◷')+'</div>';
+    const loading = Boolean(state.directFetching[station.id+':'+state.board]);
+    return base + '<div class="panel">'+emptyState(loading?'Interrogo ViaggiaTreno…':'Tabellone non disponibile',
+      loading?'Sto tentando una richiesta diretta.':'Il browser non riesce a interrogare ViaggiaTreno e non abbiamo uno snapshot valido. Non significa che non circolino treni.', '◷')+
+      '<div style="padding:0 20px 20px"><button class="outline-button" type="button" data-retry-board>↻ Riprova</button></div></div>';
   }
   const label = state.board === 'departures' ? 'Partenze' : 'Arrivi';
   const data = state.board === 'departures' ? snap.departures : snap.arrivals;
@@ -237,8 +342,9 @@ function renderStation() {
   const filter = normalize(state.filter);
   const filtered = data.filter(t =>
     !filter || normalize([t.number,t.other,t.destination,t.origin,t.category].join(' ')).includes(filter));
-  const timeText = dateTime(snap.updatedAt || state.live.generatedAt);
-  const old = ageMinutes(snap.updatedAt || state.live.generatedAt) > 40;
+  const direct = currentBoardIsDirect(station.id,state.board);
+  const timeText = dateTime(boardUpdateTime(station.id,state.board));
+  const old = !direct && ageMinutes(boardUpdateTime(station.id,state.board)) > 40;
   const warning = old ? '<div class="alert-panel"><h3>Dati non recenti</h3><p>Questo tabellone non è stato aggiornato recentemente. Non usarlo come informazione live.</p></div>' : '';
   return base + warning + '<div class="panel"><div class="board-toolbar">'+
     '<div class="board-tabs" role="tablist" aria-label="Tipo di tabellone">'+
@@ -246,7 +352,9 @@ function renderStation() {
     '" aria-selected="'+(state.board==='departures')+'" data-board="departures">↗ Partenze</button>'+
     '<button type="button" role="tab" class="board-tab '+(state.board==='arrivals'?'active':'')+
     '" aria-selected="'+(state.board==='arrivals')+'" data-board="arrivals">↙ Arrivi</button></div>'+
-    '<span class="board-updated"><span class="status-dot '+(old?'stale':'fresh')+'"></span> Acquisizione '+escapeHtml(timeText)+'</span></div>'+
+    '<span class="board-updated"><span class="status-dot '+(old?'stale':'fresh')+'"></span> '+
+    (direct?'Diretto':'Snapshot GitHub')+' · '+escapeHtml(timeText)+'</span>'+
+    '<button class="outline-button" type="button" data-retry-board aria-label="Aggiorna tabellone">↻ Aggiorna</button></div>'+
     '<div class="board-summary"><div><h3>'+label+' in stazione</h3>'+
     '<span class="board-count">'+filtered.length+' treni nel tabellone acquisito</span></div>'+
     '<input type="search" class="filter-input" id="board-filter" placeholder="Filtra treno o destinazione…" aria-label="Filtra il tabellone" value="'+escapeHtml(state.filter)+'"></div>'+
@@ -266,7 +374,7 @@ function render() {
 function showSuggestions(query) {
   const container = $('#search-suggestions');
   const input = $('#search-input');
-  if (state.searchMode !== 'station') { container.hidden = true; return; }
+  if (state.searchMode === 'train') { container.hidden = true; return; }
   const clean = normalize(query);
   if (clean.length < 2) { container.hidden=true;input.setAttribute('aria-expanded','false');return; }
   let matches = state.stations.filter(s => normalize(s.name).includes(clean));
@@ -295,12 +403,15 @@ function setMode(mode) {
   });
   const input = $('#search-input');
   input.value = '';
-  input.placeholder = mode === 'station'?'Es. Catania, Roma Termini, Milano…':'Es. 12980';
+  input.placeholder = mode === 'train' ? 'Es. 12980' :
+    mode === 'city' ? 'Es. Catania, Roma, Milano' : 'Es. Catania Centrale';
   input.inputMode = mode === 'train' ? 'numeric':'search';
-  $('#search-label').textContent = mode === 'train'?'Inserisci il numero del treno':'Cerca una stazione o una città';
+  $('#search-label').textContent = mode === 'train'?'Inserisci il numero del treno':
+    mode === 'city'?'Cerca una città':'Cerca una stazione';
   $('#search-tip').textContent = mode === 'train'
-    ? 'La ricerca copre solo i treni presenti nei tabelloni monitorati'
-    : 'Scrivi una città per scegliere tra più stazioni';
+    ? 'Il numero viene cercato nei dati disponibili'
+    : mode === 'city' ? 'Trova le stazioni della città e scegli quella giusta'
+    : 'Scrivi il nome della stazione; scegli dai suggerimenti';
   $('#search-suggestions').hidden = true;
   input.setAttribute('aria-expanded','false');
   input.focus();
@@ -311,7 +422,8 @@ function openStation(id) {
   $('#search-suggestions').hidden=true;
   $('#search-input').setAttribute('aria-expanded','false');
   $('#search-input').value='';
-  updateHash();render();
+  updateHash();render();updateHeader();
+  refreshBoardDirect(id,'departures');
   $('#main-content').scrollIntoView({behavior:'smooth',block:'start'});
 }
 function allTrainMatches(number) {
@@ -409,13 +521,19 @@ function installEvents() {
     }
     if (target.dataset.station) {openStation(target.dataset.station);return;}
     if (target.dataset.board) {
-      state.board=target.dataset.board;state.filter='';updateHash();render();return;
+      state.board=target.dataset.board;state.filter='';updateHash();render();updateHeader();
+      if (state.stationId) refreshBoardDirect(state.stationId,state.board);
+      return;
     }
     if (target.dataset.fav) {
       const id = target.dataset.fav;
       state.favorites = state.favorites.includes(id)
         ? state.favorites.filter(v=>v!==id):[...state.favorites,id];
       saveFavorites();render();return;
+    }
+    if (target.hasAttribute('data-retry-board')) {
+      if (state.stationId) refreshBoardDirect(state.stationId,state.board);
+      return;
     }
     if (target.dataset.train) {openTrain(target.dataset.train,target.dataset.sourceStation);return;}
   });
