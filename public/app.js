@@ -73,8 +73,9 @@ async function refreshData(manual = false) {
   const id = ++state.requestId;
   $('#refresh-button')?.classList.add('loading');
   try {
+    const version = Date.now();
     const results = await Promise.allSettled([
-      fetchJson('./data/stations.json', id),fetchJson('./data/live.json', id)
+      fetchJson('./data/stations.json', version),fetchJson('./data/live.json', version)
     ]);
     if (id !== state.requestId) return;
     if (results[0].status === 'fulfilled' && Array.isArray(results[0].value.stations)) {
