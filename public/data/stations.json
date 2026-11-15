@@ -1,0 +1,16 @@
+{
+  "generatedAt": null,
+  "stations": [
+    {
+      "id": "S01700",
+      "name": "MILANO CENTRALE",
+      "monitored": true
+    },
+    {
+      "id": "S06421",
+      "name": "FIRENZE SANTA MARIA NOVELLA",
+      "monitored": false
+    }
+  ],
+  "catalogComplete": false
+}
