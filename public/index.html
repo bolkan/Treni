@@ -33,30 +33,27 @@
       <section class="hero">
         <div class="hero-glow hero-glow-one"></div><div class="hero-glow hero-glow-two"></div>
         <div class="container hero-content">
-          <div class="hero-kicker"><span class="sparkle">✦</span> IL TUO TABELLONE FERROVIARIO</div>
-          <h1>Ogni treno.<br><span>Un solo sguardo.</span></h1>
-          <p class="hero-description">Arrivi, partenze, ritardi e binari. Tutto ciò che serve, senza complicazioni.</p>
+          <div class="hero-kicker">ARRIVI · PARTENZE · RITARDI</div>
+          <h1>Cerca il tuo treno</h1>
+          <p class="hero-description">Scegli come cercare, poi consulta il tabellone.</p>
           <div class="search-panel" id="search-panel">
             <div class="search-tabs" role="tablist" aria-label="Tipo di ricerca">
-              <button class="search-tab active" role="tab" aria-selected="true" data-search-mode="station" id="tab-station">⌖ &nbsp; Stazione o città</button>
-              <button class="search-tab" role="tab" aria-selected="false" data-search-mode="train" id="tab-train">▤ &nbsp; Numero treno</button>
+              <button class="search-tab active" type="button" role="tab" aria-selected="true" data-search-mode="station" id="tab-station">⌖ &nbsp; Stazione</button>
+              <button class="search-tab" type="button" role="tab" aria-selected="false" data-search-mode="city" id="tab-city">▦ &nbsp; Città</button>
+              <button class="search-tab" type="button" role="tab" aria-selected="false" data-search-mode="train" id="tab-train">▤ &nbsp; Numero treno</button>
             </div>
             <form id="search-form" autocomplete="off">
               <label for="search-input" id="search-label" class="sr-only">Cerca una stazione o una città</label>
               <div class="search-box">
                 <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10.8" cy="10.8" r="7"/><path d="m16 16 5 5"/></svg>
-                <input id="search-input" type="search" placeholder="Es. Catania, Roma Termini, Milano…" aria-controls="search-suggestions" aria-expanded="false" aria-autocomplete="list" autocomplete="off">
+                <input id="search-input" type="search" placeholder="Es. Catania Centrale" aria-controls="search-suggestions" aria-expanded="false" aria-autocomplete="list" autocomplete="off">
                 <button class="search-submit" type="submit">Cerca <span aria-hidden="true">→</span></button>
               </div>
               <div id="search-suggestions" class="suggestions" role="listbox" aria-label="Risultati della ricerca" hidden></div>
             </form>
-            <div class="search-foot">✦ <span id="search-tip">Scrivi una città per scegliere tra più stazioni</span></div>
+            <div class="search-foot"><span id="search-tip">Scrivi il nome della stazione; scegli dai suggerimenti.</span></div>
           </div>
-          <div class="hero-metrics">
-            <span><i class="tiny-check">✓</i> Nessuna registrazione</span>
-            <span><i class="tiny-check">✓</i> Preferiti salvati</span>
-            <span><i class="tiny-check">✓</i> Dati aggiornati periodicamente</span>
-          </div>
+
         </div>
       </section>
 
@@ -64,7 +61,7 @@
         <div id="notice-bar" class="notice-bar" hidden></div>
         <div id="favorites-section"></div>
         <div id="content-view" class="content-view">
-          <div class="loading-view"><span class="loading-spinner"></span><h2>Prepariamo il tabellone…</h2><p>Caricamento delle stazioni e degli ultimi dati disponibili.</p></div>
+          <div class="loading-view"><span class="loading-spinner"></span><h2>Caricamento stazioni…</h2><p>Caricamento delle stazioni e degli ultimi dati disponibili.</p></div>
         </div>
       </section>
     </main>
