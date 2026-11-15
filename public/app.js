@@ -111,14 +111,27 @@ function updateHeader() {
 function renderNotice() {
   const notice = $('#notice-bar');
   const freshness = snapshotState();
-  if (freshness === 'fresh') {
+  const partial = state.live?.status === 'partial';
+  if (freshness === 'fresh' && !partial) {
     notice.hidden = true;
     return;
   }
   notice.hidden = false;
-  notice.textContent = freshness === 'stale'
-    ? 'Attenzione: l’ultima acquisizione risale al '+dateTime(state.live.generatedAt)+'. Le informazioni potrebbero essere superate. Controlla sempre i canali ufficiali.'
-    : 'I dati ferroviari non sono ancora disponibili. Il catalogo e i preferiti restano utilizzabili; GitHub Actions recupererà gli orari quando la fonte risponderà.';
+  const catalog = Number(state.live?.catalogCount || 0);
+  const boards = Number(state.live?.successfulBoards || 0);
+  const errors = Array.isArray(state.live?.diagnostics) ? state.live.diagnostics : [];
+  const title = freshness === 'stale'
+    ? 'Attenzione: dati acquisiti il '+dateTime(state.live.generatedAt)+'.'
+    : partial ? 'Solo alcuni tabelloni sono disponibili.'
+    : 'Dati ferroviari non disponibili.';
+  let details = freshness === 'stale'
+    ? ' Gli orari potrebbero essere superati.'
+    : ' Il sito è online, ma il raccoglitore non ha ancora ottenuto tabelloni validi.';
+  if (Number.isFinite(catalog) && Number.isFinite(boards) && (catalog || boards)) {
+    details += ' Catalogo: '+catalog+' stazioni. Tabelloni riusciti: '+boards+'.';
+  }
+  if (errors.length) details += ' Diagnostica: '+errors[0]+'.';
+  notice.textContent = title + details;
 }
 function updateHash() {
   const params = new URLSearchParams();
