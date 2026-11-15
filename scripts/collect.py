@@ -128,17 +128,24 @@ def load_catalog(names: list[str]) -> list[dict]:
 
     catalog: dict[str, dict] = {}
     successes = 0
+    consecutive_failures = 0
     for region in REGIONS:
         try:
             entries = parse_stations(fetch(f"elencoStazioni/{region}"))
             if entries:
                 successes += 1
+                consecutive_failures = 0
                 for item in entries:
                     catalog[item["id"]] = item
             else:
+                consecutive_failures += 1
                 LOG.warning("Regione %s: elenco vuoto/non valido", region)
         except Exception as exc:
+            consecutive_failures += 1
             LOG.warning("Regione %s: %s", region, exc)
+        if consecutive_failures >= 4 and not successes:
+            LOG.error("Catalogo non raggiungibile: interrompo i tentativi regionali")
+            break
         time.sleep(0.08)
 
     # Risolvi i nomi configurati anche quando le stazioni mancano dal catalogo regionale.
@@ -253,8 +260,8 @@ def normalize_train(record: dict, direction: str) -> dict | None:
 
 def fetch_board(station: dict, direction: str, moment: datetime) -> list[dict]:
     endpoint = "partenze" if direction == "departures" else "arrivi"
-    # L'orario locale con offset evita ambiguità con l'ora legale.
-    stamp = moment.strftime("%a %b %d %Y %H:%M:%S GMT%z")
+    # Formato locale documentato per l'endpoint non ufficiale.
+    stamp = moment.strftime("%a %b %d %Y %H:%M:%S")
     path = f"{endpoint}/{station['id']}/{quote(stamp, safe='')}"
     items = fetch(path)
     if not isinstance(items, list):
